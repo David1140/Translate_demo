@@ -1,0 +1,1 @@
+EntoWav 编译环境 ubuntu18.0.4 g++ EntoWav.cpp  -o EntoWav -std=c++11 -lcurl -l jsoncpp
