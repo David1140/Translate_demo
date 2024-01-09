@@ -1,0 +1,2 @@
+# Translate_demo
+基于百度智能云和ESP联网的嵌入式智能翻译机
