@@ -32,7 +32,7 @@ String token="24.2dd8f242f4f448e4febbc3a81800db2f.2592000.1711328785.282335-4570
 // String client_secret_voice = "O7SmzOcKynFSGkoPWcSBGDkOjqZupaLl";
 // String client_id_translate = "kM5AAWhILGSgjt6axCv3iQVw";
 // String client_secret_translate = "WOM4Y4kGxgPoie4YtDDijRZ5eqpeEcGu";
-uint32_t time1=0,time2=0;int num=0,n=0;//caiyangshuju he shijian
+uint32_t time1=0,time2=0;int num=0,n_recording=0;//caiyangshuju he shijian
 /***********标志位设置************/
 uint8_t adc_start_flag=0,adc_complete_flag=0;       //adc采样开始标志
 /*容器设置*/
@@ -40,15 +40,15 @@ File File1;
 volatile uint16_t adc_temp[MAX_LEN];
 hw_timer_t * timer = NULL;//定时器
 /******函数声明******/
-//String gain_token(String api_key,String seceretkey);   //获取token
-//String ch_to_ev();                                    //中文语音to英文文本
-//void entospeaker();                                   //英文文本转音频编码输出
+// String gain_token(String api_key,String seceretkey);   //获取token
+// String ch_to_ev();                                    //中文语音to英文文本
+// void entospeaker();                                   //英文文本转音频编码输出
 //void draw(String text);
 void setClock();
+void ADCtoEn();//测试SD卡内数据是否能传输到服务器
 void ADC_Sampling(volatile uint16_t *adc_temp);
 void TO_connect_internet();
 void play_the_adc(volatile uint16_t *adc_temp);
-//void MyTone(int frequency, int duration);
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 void IRAM_ATTR TimerHandler()
 {
@@ -74,7 +74,7 @@ void setup()
     Serial.begin(115200);
     pinMode(key,INPUT_PULLUP);
     pinMode(LED_BUILTIN, OUTPUT);pinMode(speaker,OUTPUT);
-    //pinMode(ADC, INPUT);
+    pinMode(ADC, INPUT);
     WiFi.mode(WIFI_OFF);//先关闭WIFI功能避免影响采样数据
     // u8g2.begin();
     // u8g2.enableUTF8Print();
@@ -84,12 +84,40 @@ void setup()
       Serial.println("Card failed, or not present");
     }
     Serial.println("card initialized.");
-    
 }
 
 void loop()
 {
-  while(digitalRead(key)) {
+  while(digitalRead(key)) 
+    esp_task_wdt_reset(); 
+  SD.remove("/adc_test.pcm");
+  File File_test = SD.open("/adc_test.pcm",FILE_WRITE);
+  if (File_test) {
+     Serial.print("打开/创建文件成功");
+  } 
+  else {
+      // 如果文件打开失败，打印错误原因
+      Serial.print("打开文件失败，错误原因：");
+      Serial.println(errno);
+      return;
+  }
+  time1=0,time2=0,n_recording=0;
+  time1=micros();
+  while(!digitalRead(key))
+  {
+    File_test.write(analogRead(ADC)/16); // 写入低位字节
+    //File_test.write((byte)(value >> 8));   // 写入高位字节
+    n_recording++;
+    //Serial.println(value);
+  }
+  time2=micros()-time1; 
+  File_test.close();
+  Serial.printf("\nstime:%fHZ\n",n_recording/(time2/1000000.00f));
+}
+
+void ADCtoEn()
+{
+    while(digitalRead(key)) {
     esp_task_wdt_reset(); 
       //ets_delay_us(10);
   }
