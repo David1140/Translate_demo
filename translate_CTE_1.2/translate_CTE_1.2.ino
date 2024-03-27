@@ -9,8 +9,6 @@
 #include <SPI.h>
 #include <SD.h>
 #include <errno.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 // #ifdef U8X8_HAVE_HW_SPI
 // #include <SPI.h>
 // #endif
@@ -28,30 +26,29 @@
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);  // All Boards without Reset of the Display
 //常量设置
 String token="24.26f61038c317c0684d993b71686651cb.2592000.1713598074.282335-45702264",payload="";
+/*
+短语音识别请求地址： http://vop.baidu.com/server_api
+短语音翻译： https://aip.baidubce.com/rpc/2.0/mt/v2/speech-translation
+文本翻译： https://aip.baidubce.com/rpc/2.0/mt/texttrans/v1
+*/
 //中文语音识别token,payload为显示在屏幕上的内容用互斥锁保护
 const char* adc_temp="/adc_8k.pcm",*pcm_temp="/pcm.txt";
 //data_info为识别为中文的json数据体部分
-String data_info = "{\"format\":\"pcm\",\"rate\":8000,\"dev_pid\":1537,\"channel\":1,\"cuid\":\"N0N6zV45wOYTQJHQNgbUvYtH38hvE94c\",\"token\":\"24.0d48d0e41557fb5a10b48a6ff92a2f09.2592000.1712891274.282335-44116513\",\"len\":";
 /***********标志位设置************/
 uint8_t adc_start_flag=0,adc_complete_flag=0;       //adc采样开始标志
-SemaphoreHandle_t xMutex;//互斥锁，保护显示在屏幕上的字符串变量
-String voiceResult;//语音识别的结果
+//SemaphoreHandle_t xMutex;//互斥锁，保护显示在屏幕上的字符串变量
 /*容器设置*/
 uint32_t time1=0,time2=0;int n_recording=0;//统计采样数据和时间
 /******函数声明******/
-//void ADCtoEn();//测试SD卡内数据是否能传输到服务器
 int ADC_Sampling(const char* filename);//采样
 void TO_connect_internet();//联网
 void encodeFileToBase64(const char* inputFile, const char* outputFile);//转码
 void play_the_adc(const char* filename, int sampleRate);//播放
 void draw(void *arg);//显示
 //String gain_token(String api_key,String seceretkey);  //获取token
-void task_1(void *arg);
 String ch_to_en(String str_voice);//中转英
 String Regnization(const char* filename1,const char* filename2); //adc识别
 String str_target(String src,String start,String end);//截取字符串                          
-//void entospeaker();                                   //英文文本转音频编码输出
-
 void setup()
 {
     Serial.begin(115200);//串口设置波特率
@@ -69,24 +66,11 @@ void setup()
       Serial.println("Card failed, or not present");delay(500);
     }
     Serial.println("card initialized.");
-    xMutex = xSemaphoreCreateMutex();
-    /* pvTaskCode: 函数指针，指向要运行的任务函数。在这里就是 keyTask 函数。
-      pcName: 任务的名称，便于在调试时识别任务。
-      usStackDepth: 任务堆栈的大小，以字为单位。任务在执行时会使用堆栈空间来存储临时变量和函数调用信息。
-      pvParameters: 传递给任务函数的参数，可以是任意类型的指针，通常用来传递任务需要的数据。
-      uxPriority: 任务的优先级，取值范围是 0 到 configMAX_PRIORITIES-1，数值越大，优先级越高。
-      pxCreatedTask: 可选参数，用于获取指向新创建任务句柄的指针，如果不需要此句柄，可以传入 NULL。
-      xCoreID: 指定任务要运行的核心编号。ESP32 是一个双核处理器，有 0 和 1 两个核心可供选择。 */
-      //xTaskCreatePinnedToCore(task_1, "translateTask", 5000, NULL, 2, NULL, 0);
-      const char* payloadChar = payload.c_str();
-      xTaskCreatePinnedToCore(draw, "DisplayTask", 4096, (void*)payloadChar, 1, NULL, 1);
 }
 
 void loop()
 {
   //String input = "";
-  //for(;;)
-  {
     Serial.println("按下按键开始录音");
     while(digitalRead(key)) //等待按键按下
     {esp_task_wdt_reset();}  
@@ -96,53 +80,23 @@ void loop()
     // Serial.println("开始上传给网站");
     // //容器初始化
     String str_voice = Regnization(adc_temp,pcm_temp);//采样数据识别为中文
-    /*如果想把串口输入的信息显示到屏幕上把“//@”取消注释，把payload赋值为input*/
-    //  if(Serial.available()>0){
-    //   char incomingChar = Serial.read(); //读取串口数据
-    //    if (incomingChar == '\n') 
-    //    { // 如果接收到换行符，说明一行字符串接收完成
-    //      Serial.print("Received: ");Serial.println(input); // 将接收到的完整字符串打印出来
-    String en_str = ch_to_en(str_voice);
-      xSemaphoreTake(xMutex, portMAX_DELAY);
-         //翻译，内容同步到显示内容中
+    // /*如果想把串口输入的信息显示到屏幕上把“//@”取消注释，把payload赋值为input*/
+    // //  if(Serial.available()>0){
+    // //   char incomingChar = Serial.read(); //读取串口数据
+    // //    if (incomingChar == '\n') 
+    // //    { // 如果接收到换行符，说明一行字符串接收完成
+    // //      Serial.print("Received: ");Serial.println(input); // 将接收到的完整字符串打印出来
+    if(str_voice == "")
+      return;
+    String en_str = ch_to_en(str_voice);//翻译，内容同步到显示内容中
+      //xSemaphoreTake(xMutex, portMAX_DELAY);
       payload =en_str;//input;//
-      xSemaphoreGive(xMutex);//input = ""; // 清空缓冲区，准备下一次接收
-    //    }
+      //xSemaphoreGive(xMutex);//input = ""; // 清空缓冲区，准备下一次接收
+    //    }client is closed
     //    else {input += incomingChar; // 将接收到的字符追加到已有字符串后面
     //   }
     // }
-  }
-}
-void task_1(void *arg)
-{
-  String input = "";
-  for(;;)
-  {
-    //Serial.println("按下按键开始录音");
-    //while(digitalRead(key)) //等待按键按下
-    {esp_task_wdt_reset();}  
-    //int sampleRate = ADC_Sampling(adc_temp);//采样
-    // //play_the_adc(adc_temp,sampleRate);//播放
-    //encodeFileToBase64(adc_temp,pcm_temp);//编码
-    // Serial.println("开始上传给网站");
-    // //容器初始化
-    //String str_voice = Regnization(adc_temp,pcm_temp);//采样数据识别为中文
-    /*如果想把串口输入的信息显示到屏幕上把“//@”取消注释，把payload赋值为input*/
-     if(Serial.available()>0){
-      char incomingChar = Serial.read(); //读取串口数据
-       if (incomingChar == '\n') 
-       { // 如果接收到换行符，说明一行字符串接收完成
-         Serial.print("Received: ");Serial.println(input); // 将接收到的完整字符串打印出来
-    //String en_str = ch_to_en(str_voice);
-      xSemaphoreTake(xMutex, portMAX_DELAY);
-         //翻译，内容同步到显示内容中
-      payload =input;//en_str;//
-      xSemaphoreGive(xMutex);input = ""; // 清空缓冲区，准备下一次接收
-       }
-       else {input += incomingChar; // 将接收到的字符追加到已有字符串后面
-      }
-    }
-  }
+  draw((void*)NULL);
 }
 String ch_to_en(String str_voice)
 {
@@ -191,53 +145,62 @@ String ch_to_en(String str_voice)
 String Regnization(const char* filename1,const char* filename2)  
 {
     File File1,File2;String end_rec = "";
-    File1 = SD.open(filename1,"r");
-    int adc_len = File1.size();
-    File1.close();
-    TO_connect_internet();//连接WiFi
-    HTTPClient client;
-    data_info+=String(adc_len)+",\"speech\":\"";
-    File2 = SD.open(filename2,"r");int fileSize = File2.size();
-    if (File2) {
-      // 从文件中读取内容
-      while (File2.available()) {
-        String temp = File2.readString();
-        // 将从文件中读取的数据直接写入客户端
-        data_info+=temp;
-      }
-      data_info+="\"}";
+    String data_info = "{\"format\":\"pcm\",\"rate\":8000,\"channel\":1,\"cuid\":\"N0N6zV45wOYTQJHQNgbUvYtH38hvE94c\",\"token\":\"24.8d2d0880c8f7e6324011ba7eaab84f9a.2592000.1714034087.282335-44116513\"\"speech\":\"";
+    File2 = SD.open(filename2,"r");
+    if (File2) 
+    {
+        // 创建安全的 Wi-Fi 客户端对象
+        WiFiClientSecure client;
+        // 禁用根证书验证
+        client.setInsecure();//http://vop.baidu.com
+        String post_url = String("POST /server_api HTTP/1.1\r\n") +
+                            "Host: vop.baidu.com\r\n" +
+                            "Content-Type: application/json\r\n" +
+                            "Connection: close\r\n" +"\r\n" +
+                            data_info;
+                            // 从文件中读取内容
+        while (File2.available()) {
+          post_url+=(File2.readString());
+        }
+        post_url+=("\",\"len\":");
+        File1 = SD.open(filename1,"r");
+        int adc_len = File1.size();
+        post_url+=String(adc_len);post_url+="}";
+        File1.close();//\"dev_pid\":1537,
+        Serial.println(post_url.c_str());
+        // 向服务器发起 HTTPS 请求
+        if (client.connect("vop.baidu.com", 443)) 
+        {
+            client.print(post_url.c_str());
+            
+            // 等待一段时间以确保服务器发送所有数据
+            //delay(1000);
+
+            while (client.connected() || client.available()) 
+            {
+              // 读取服务器响应
+                String line = client.readStringUntil('\r');
+                // 处理服务器响应
+                Serial.println(line);
+                String temp = str_target(line,"\"result\":[\"","\"]");
+                if(temp!=nullptr)
+                {
+                end_rec = temp;Serial.printf("结果：%s\n",end_rec.c_str());
+                }
+            }
+            // 断开连接
+            client.stop();
+            Serial.println("Recognition complete");
+        } else {
+          Serial.println("Connection failed");
+        }
     } else {
       // 如果文件打开失败，打印错误原因
       Serial.print("打开文件失败，错误原因：");
       Serial.println(errno);
-      return "";
     }
-    //Serial.println(data_info);
-    client.begin("http://vop.baidu.com/server_api");
-    client.addHeader("Content-Type","application/json");
-    int httpCode = client.POST(data_info.c_str());
-    delay(1000);  // 等待一段时间以确保服务器发送所有数据
-    if (!client.connected()) {
-        // 连接已关闭，退出循环
-        Serial.print("client is closed");
-        return "";
-    }
-    if(httpCode > 0) {
-        if(httpCode == HTTP_CODE_OK) {
-          String line = client.getString();Serial.println(line);
-          String temp = str_target(line,"\"result\":[\"","\"]");
-          if(temp!=nullptr)
-          {
-           end_rec = temp;Serial.printf("结果：%s\n",end_rec.c_str());
-          }
-        }
-    }
-    else {
-        Serial.printf("[HTTP] GET... failed, error: %s\n", client.errorToString(httpCode).c_str());
-    }
-    client.end();
-    Serial.printf("Recognition complete\r\n");
-    return end_rec;
+    File2.close();
+    return end_rec; 
 }
 
 int ADC_Sampling(const char* filename)
@@ -323,6 +286,7 @@ void encodeFileToBase64(const char* inputFile, const char* outputFile)
     Serial.println("无法打开输入文件");
     return;
   }
+  SD.remove(outputFile);//移除上一次录入的数据
   // 创建输出文件
   File outFile = SD.open(outputFile, FILE_WRITE);
   if (!outFile) {
@@ -334,23 +298,22 @@ void encodeFileToBase64(const char* inputFile, const char* outputFile)
   while (inFile.available()) {
     String line = inFile.readString();
     // 编码数据并写入输出文件
-    String encodedData = base64::encode(line);
-    outFile.print(encodedData);
+    outFile.print(base64::encode(line));
   }
   // 关闭文件
   inFile.close();
   outFile.close();
-  Serial.println("文件编码完成，按下按键上传给网站");
 }
 void draw(void *arg)
 {
-  String previous_payload = "";
-    for (;;)
+  //String previous_payload = "";
+    //for (;;)
     {
         int str_size = payload.length();
         //Serial.printf("size:%d,%s\n", str_size, payload.c_str());
-        if(payload!=previous_payload)
-        {previous_payload=payload;Serial.printf("draw:%s\n",previous_payload.c_str());}
+        //if(payload!=previous_payload)
+        {//previous_payload=payload;
+        Serial.printf("draw:%s\n",payload.c_str());}
         int total_lines = (str_size + 15) / 16; // 计算字符串总共需要多少行来显示
         int total_pages = (total_lines + 3) / 4; // 计算总共需要多少页来显示
 
@@ -362,19 +325,17 @@ void draw(void *arg)
         for (int page = 1; page <= total_pages; page++)
         {
           u8g2.clearBuffer(); // 清空屏幕
-          if (start_pos >= str_size) // 判断是否已经显示完所有字符
-                {
-                    delay(500); // 换页延时
-                    break;
-                }
+          
             for (int line = 0; line < 4; line++)
             {
                 u8g2.setCursor(0, 15 + line * 15); // 设置每行起始位置
                 String subText = payload.substring(start_pos, start_pos + 16); // 截取需要显示的部分
                 u8g2.print(subText);
-                //Serial.printf("(%d,%d),payload:%s\n", 0, 15 + line * 15, subText.c_str());
+                Serial.printf("(%d,%d),payload:%s\n", 0, 15 + line * 15, subText.c_str());
                 u8g2.sendBuffer();
                 start_pos += 16; // 更新截取位置
+                if (start_pos >= str_size) // 判断是否已经显示完所有字符
+                  {break;}
             }
             delay(800); // 换页延时
         }
