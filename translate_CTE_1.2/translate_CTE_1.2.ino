@@ -8,6 +8,7 @@
 #include <esp_task_wdt.h>
 #include <SPI.h>
 #include <SD.h>
+#include "driver/dac.h"
 #include <errno.h>
 // #ifdef U8X8_HAVE_HW_SPI
 // #include <SPI.h>
@@ -22,10 +23,10 @@
 #define key 15//ESP8266:0 / ESP32:15
 #define ADC 39 //ESP32:39 /ESP9266:A0
 #define LED_BUILTIN 2//ESP8266 LED_BUILTIN ESP32:2     //SCL=5,SDA=4
-#define speaker 13
+#define speaker DAC_CHANNEL_1 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);  // All Boards without Reset of the Display
 //常量设置
-String token="24.26f61038c317c0684d993b71686651cb.2592000.1713598074.282335-45702264",payload="";
+String token="24.26f61038c317c0684d993b71686651cb.2592000.1713598074.282335-45702264",payload="";//翻译token
 /*
 短语音识别请求地址： http://vop.baidu.com/server_api
 短语音翻译： https://aip.baidubce.com/rpc/2.0/mt/v2/speech-translation
@@ -46,15 +47,18 @@ void encodeFileToBase64(const char* inputFile, const char* outputFile);//转码
 void play_the_adc(const char* filename, int sampleRate);//播放
 void draw(void *arg);//显示
 //String gain_token(String api_key,String seceretkey);  //获取token
+String urlEncode(String text);//urlencode编码
 String ch_to_en(String str_voice);//中转英
 String Regnization(const char* filename1,const char* filename2); //adc识别
-String str_target(String src,String start,String end);//截取字符串                          
+String En_to_voice(String words);
+String str_target(String src,String start,String end);//截取字符串                      
 void setup()
 {
     Serial.begin(115200);//串口设置波特率
     //引脚初始化 按键：上拉输入 led灯、输出功放：输出 adc采样口：输入
     pinMode(key,INPUT_PULLUP);//pinMode(LED_BUILTIN, OUTPUT);
-    pinMode(speaker,OUTPUT);
+    dac_output_enable(speaker);
+    //pinMode(speaker,OUTPUT);
     pinMode(ADC, INPUT);
     //WiFi.mode(WIFI_OFF);//先关闭WIFI功能避免影响采样数据
     TO_connect_internet();
@@ -70,33 +74,40 @@ void setup()
 
 void loop()
 {
-  //String input = "";
     Serial.println("按下按键开始录音");
+    payload = "按下按键开始录音";
+    draw((void*)NULL);
     while(digitalRead(key)) //等待按键按下
     {esp_task_wdt_reset();}  
     int sampleRate = ADC_Sampling(adc_temp);//采样
-    // //play_the_adc(adc_temp,sampleRate);//播放
+    //按下开始播放
+    Serial.println("按下按键播放刚刚的录音");
+    payload = "按下按键播放刚刚的录音";
+    draw((void*)NULL);
+    while(digitalRead(key)) //等待按键按下
+    {esp_task_wdt_reset();}  
+    play_the_adc(adc_temp,sampleRate);//播放
     encodeFileToBase64(adc_temp,pcm_temp);//编码
-    // Serial.println("开始上传给网站");
-    // //容器初始化
+    Serial.println("开始上传给网站");
+    payload = "开始上传给网站";
+    draw((void*)NULL);
+    payload = "Hello,world";
+    //***************流程暂时舍弃
+    /*
     String str_voice = Regnization(adc_temp,pcm_temp);//采样数据识别为中文
-    // /*如果想把串口输入的信息显示到屏幕上把“//@”取消注释，把payload赋值为input*/
-    // //  if(Serial.available()>0){
-    // //   char incomingChar = Serial.read(); //读取串口数据
-    // //    if (incomingChar == '\n') 
-    // //    { // 如果接收到换行符，说明一行字符串接收完成
-    // //      Serial.print("Received: ");Serial.println(input); // 将接收到的完整字符串打印出来
     if(str_voice == "")
       return;
     String en_str = ch_to_en(str_voice);//翻译，内容同步到显示内容中
       //xSemaphoreTake(xMutex, portMAX_DELAY);
       payload =en_str;//input;//
       //xSemaphoreGive(xMutex);//input = ""; // 清空缓冲区，准备下一次接收
-    //    }client is closed
-    //    else {input += incomingChar; // 将接收到的字符追加到已有字符串后面
-    //   }
-    // }
-  draw((void*)NULL);
+    */
+    //***************流程暂时舍弃
+    draw((void*)NULL);
+    while(digitalRead(key)) //等待按键按下
+    {esp_task_wdt_reset();}  
+    //String translate_pcm = En_to_voice("Hello World");
+    play_the_adc("/en.pcm",8000);
 }
 String ch_to_en(String str_voice)
 {
@@ -126,9 +137,6 @@ String ch_to_en(String str_voice)
     client.print(test.length());
     client.print("\r\n\r\n");
     client.print(test);
-
-    delay(1000);  
-
     while (client.connected() || client.available()) {
         if (client.available()) {
             String line = client.readStringUntil('\n');
@@ -144,63 +152,51 @@ String ch_to_en(String str_voice)
 }
 String Regnization(const char* filename1,const char* filename2)  
 {
-    File File1,File2;String end_rec = "";
-    String data_info = "{\"format\":\"pcm\",\"rate\":8000,\"channel\":1,\"cuid\":\"N0N6zV45wOYTQJHQNgbUvYtH38hvE94c\",\"token\":\"24.8d2d0880c8f7e6324011ba7eaab84f9a.2592000.1714034087.282335-44116513\"\"speech\":\"";
-    File2 = SD.open(filename2,"r");
-    if (File2) 
-    {
-        // 创建安全的 Wi-Fi 客户端对象
-        WiFiClientSecure client;
-        // 禁用根证书验证
-        client.setInsecure();//http://vop.baidu.com
-        String post_url = String("POST /server_api HTTP/1.1\r\n") +
-                            "Host: vop.baidu.com\r\n" +
-                            "Content-Type: application/json\r\n" +
-                            "Connection: close\r\n" +"\r\n" +
-                            data_info;
-                            // 从文件中读取内容
-        while (File2.available()) {
-          post_url+=(File2.readString());
-        }
-        post_url+=("\",\"len\":");
-        File1 = SD.open(filename1,"r");
-        int adc_len = File1.size();
-        post_url+=String(adc_len);post_url+="}";
-        File1.close();//\"dev_pid\":1537,
-        Serial.println(post_url.c_str());
-        // 向服务器发起 HTTPS 请求
-        if (client.connect("vop.baidu.com", 443)) 
-        {
-            client.print(post_url.c_str());
-            
-            // 等待一段时间以确保服务器发送所有数据
-            //delay(1000);
-
-            while (client.connected() || client.available()) 
-            {
-              // 读取服务器响应
-                String line = client.readStringUntil('\r');
-                // 处理服务器响应
-                Serial.println(line);
-                String temp = str_target(line,"\"result\":[\"","\"]");
-                if(temp!=nullptr)
-                {
-                end_rec = temp;Serial.printf("结果：%s\n",end_rec.c_str());
-                }
-            }
-            // 断开连接
-            client.stop();
-            Serial.println("Recognition complete");
-        } else {
-          Serial.println("Connection failed");
-        }
+    File File1,File2;String end_rec = ""; 
+    HTTPClient client;
+    String data_info = "{\"format\":\"pcm\",\"rate\":8000,\"dev_pid\":1537,\"channel\":1,\"cuid\":\"N0N6zV45wOYTQJHQNgbUvYtH38hvE94c\",\"token\":\"24.f5216f0dedf451f294ae99ea2a535621.2592000.1714461874.282335-44116513\",\"speech\":\"";
+    File2 = SD.open(filename2,"r");int fileSize = File2.size();
+    if (File2) {
+      // 从文件中读取内容
+      while (File2.available()) {
+        data_info+=File2.readString();
+      }
+      data_info+="\",\"len\":";
+      File1 = SD.open(filename1,"r");
+      data_info+=String(File1.size());data_info+=String("}");
+      File1.close();
     } else {
       // 如果文件打开失败，打印错误原因
       Serial.print("打开文件失败，错误原因：");
       Serial.println(errno);
+      return "";
     }
-    File2.close();
-    return end_rec; 
+    //Serial.println(data_info);
+    client.begin("http://vop.baidu.com/server_api");
+    client.addHeader("Content-Type","application/json");
+    int httpCode = client.POST(data_info);//.c_str()
+    delay(1000);  // 等待一段时间以确保服务器发送所有数据
+    if (!client.connected()) {
+        // 连接已关闭，退出循环
+        Serial.print("client is closed");
+        return "";
+    }
+    if(httpCode > 0) {
+        if(httpCode == HTTP_CODE_OK) {
+          String line = client.getString();//Serial.println(line);
+          String temp = str_target(line,"\"result\":[\"","\"]");
+          if(temp!=nullptr)
+          {
+           end_rec = temp;Serial.printf("结果：%s\n",end_rec.c_str());
+          }
+        }
+    }
+    else {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", client.errorToString(httpCode).c_str());
+    }
+    client.end();
+    Serial.printf("Recognition complete\r\n");
+    return end_rec;
 }
 
 int ADC_Sampling(const char* filename)
@@ -259,20 +255,23 @@ void play_the_adc(const char* filename, int sampleRate)
     }
     // 获取文件大小
     int fileSize = file.size();
-    Serial.print("文件大小: ");
-    Serial.print(fileSize);
-    Serial.println(" 字节"); 
-    // 计算每个样本的播放延时微秒数
     int delayMicros = 1000000 / sampleRate;   
+    Serial.printf("文件大小:%d字节，播放延迟：%d\n",fileSize,delayMicros);
+    // 计算每个样本的播放延时微秒数
+    int time1=0,time2=0;
+    time1=micros();
     while (file.available())
     {
       // 读取两个字节的数据
       uint16_t value = (uint16_t)file.read() | ((uint16_t)file.read()<<8 );
       // 将16位数据转换为8位数据
       uint8_t data = (uint8_t)(value/256);   
-      analogWrite(speaker, data);
+      dac_output_voltage(speaker, data);
+      //analogWrite(speaker, data);
       delayMicroseconds(delayMicros);
-    }  
+    }
+    time2=micros()-time1; 
+    Serial.printf("time:%d\n",time2);  
     analogWrite(speaker, 0);
     // 关闭文件
     file.close();
@@ -342,6 +341,85 @@ void draw(void *arg)
     }
     // while(digitalRead(key)) //等待按键按下
     //   esp_task_wdt_reset();  
+}
+String En_to_voice(String words)
+{
+    if (WiFi.status() != WL_CONNECTED)
+      TO_connect_internet();
+    if (words == "")
+      return "";
+    const char* filename = "/en.pcm";
+    SD.remove(filename);
+    File pcmFile;
+    // 打开文件以写入 PCM 数据
+    pcmFile = SD.open(filename, FILE_WRITE);
+    if (!pcmFile) {
+      Serial.println("Failed to open file for writing");
+      return "";
+    }
+    String data_info = "tex=" + urlEncode(urlEncode(words)) + "&tok=24.f5216f0dedf451f294ae99ea2a535621.2592000.1714461874.282335-44116513&cuid=ESP32&ctp=1&lan=zh&spd=5&pit=5&vol=14&per=1&aue=5";
+    Serial.printf("Translation URL: %s\n", data_info.c_str());
+    HTTPClient http;
+    http.begin("http://tsn.baidu.com/text2audio"); // 指定目标URL
+
+    // 设置HTTP请求头部
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    http.addHeader("Accept", "*/*");
+    int httpResponseCode = http.POST(data_info);
+    if (httpResponseCode > 0) {
+      if(httpResponseCode == HTTP_CODE_OK){
+        String line = http.getString();
+        Serial.println(line);
+        // char c = client.read();
+        // if (c == '\"') {
+        //     // 发现双引号，可能是 "binary": " 的开始
+        //     String binaryMarker = client.readStringUntil('\"');
+        //     Serial.println(binaryMarker);
+        //     if (binaryMarker == "binary\":") {
+        //         // 找到了 "binary": " 的开始
+        //         // 读取并写入PCM数据到SD卡
+        //         while (client.available()) {
+        //             char dataChar = client.read();
+        //             if (dataChar == '\"') {
+        //                 break;
+        //             } else {
+        //                 // 写入数据到SD卡
+                         pcmFile.print(line);
+        //             }
+        //         }
+        //         // 数据写入完成，退出循环
+        //         break;
+        //     }
+        // }
+      }
+    }
+
+    // 关闭文件
+    pcmFile.close();
+    Serial.println("PCM file saved successfully");
+
+    http.end();
+    Serial.println("Speech synthesis");
+    return String("/en.pcm");
+
+}
+String urlEncode(String text) {
+  String encodedText = "";
+  char c;
+  char code[4];
+  for (int i = 0; i < text.length(); i++) {
+    c = text.charAt(i);
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_' || c == '~') {
+      encodedText += c;
+    } else if (c == ' ') {
+      encodedText += "+";
+    } else {
+      sprintf(code, "%%%02X", c);
+      encodedText += code;
+    }
+  }
+  return encodedText;
 }
 String str_target(String src,String start,String end)
 {
