@@ -17,8 +17,8 @@
 #include <Wire.h>
 #endif
 /*ESP32环境下*/
-#define OLED_WIDTH 127
-#define OLED_HEIGHT 63
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
 //设置gpio口
 #define key 15//ESP8266:0 / ESP32:15
 #define ADC 39 //ESP32:39 /ESP9266:A0
@@ -107,6 +107,7 @@ void loop()
     while(digitalRead(key)) //等待按键按下
     {esp_task_wdt_reset();}  
     //String translate_pcm = En_to_voice("Hello World");
+    //play_the_adc(translate_pcm,8000);
     play_the_adc("/en.pcm",8000);
 }
 String ch_to_en(String str_voice)
@@ -370,30 +371,9 @@ String En_to_voice(String words)
       if(httpResponseCode == HTTP_CODE_OK){
         String line = http.getString();
         Serial.println(line);
-        // char c = client.read();
-        // if (c == '\"') {
-        //     // 发现双引号，可能是 "binary": " 的开始
-        //     String binaryMarker = client.readStringUntil('\"');
-        //     Serial.println(binaryMarker);
-        //     if (binaryMarker == "binary\":") {
-        //         // 找到了 "binary": " 的开始
-        //         // 读取并写入PCM数据到SD卡
-        //         while (client.available()) {
-        //             char dataChar = client.read();
-        //             if (dataChar == '\"') {
-        //                 break;
-        //             } else {
-        //                 // 写入数据到SD卡
                          pcmFile.print(line);
-        //             }
-        //         }
-        //         // 数据写入完成，退出循环
-        //         break;
-        //     }
-        // }
       }
     }
-
     // 关闭文件
     pcmFile.close();
     Serial.println("PCM file saved successfully");
@@ -401,7 +381,6 @@ String En_to_voice(String words)
     http.end();
     Serial.println("Speech synthesis");
     return String("/en.pcm");
-
 }
 String urlEncode(String text) {
   String encodedText = "";
